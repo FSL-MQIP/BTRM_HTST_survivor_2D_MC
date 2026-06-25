@@ -1,0 +1,179 @@
+---
+title: "Validation against raw and DI data from VSL"
+author: "Leonie Kemmerling"
+date: "2025-11-10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(readxl)
+library(dplyr)
+library(lme4)
+library(ggplot2)
+library(tidyverse)
+
+```
+
+```{r}
+#load VSL data from DI samples and raw milk samples 
+
+raw_samples_wide <- read_xlsx("Raw-Pasteurized Data 2025-11-09.xlsx", sheet = "raw_samples_wide")
+past_samples_wide <- read_xlsx("Raw-Pasteurized Data 2025-11-09.xlsx", sheet ="past_samples_wide")
+
+#clean data
+# log conversion of pasteurized samples
+
+    past_samples_wide$DI_SPC_log10 <- log10(past_samples_wide$DI_SPC_dataValue)
+    
+    raw_samples_wide$SPC_log10 <- log10(raw_samples_wide$SPC_dataValue)
+   
+        #match raw milk SPCs to pasteurized milk SPCs
+    past_samples_wide <- past_samples_wide %>%
+      left_join(raw_samples_wide %>% dplyr::select(VSL_plant, SPC_log10) %>%
+                  rename(raw_SPC_log10 = SPC_log10),
+                by = "VSL_plant")
+    
+    #filter out samples with PPC (i.e., high CVTA count on DI)
+    past_samples_wide <- past_samples_wide %>%
+      filter(grepl("<", DI_CVTA_greaterThanLessThan))
+    
+    
+    #for samples with SPC below detection limit, replace values with a quarter of detection limt (10->2.5)
+    past_samples_wide <- past_samples_wide %>%
+      mutate(DI_SPC_log10 = if_else(grepl("<", DI_SPC_greaterThanLessThan), log10(2.5), DI_SPC_log10))
+    
+    #create new column that only contains the plant ID
+    past_samples_wide <- past_samples_wide %>%
+      mutate(plant_ID = sub(".*-", "", VSL_plant))
+    
+
+    #remove samplings with multiple raw milk samples
+    past_samples_wide <- past_samples_wide %>%
+        filter(!VSL_plant %in% c("492-12", "525-53"))
+
+    
+    
+    past_samples_wide$count_difference <- past_samples_wide$raw_SPC_log10 - past_samples_wide$DI_SPC_log10
+    
+    past_samples_wide <- past_samples_wide %>%
+      filter(!count_difference < 0)
+    
+    #what are the metrics of count diffence within each smapling
+    within_sampling_cd_stats <- past_samples_wide %>%
+      group_by(VSL_plant) %>%
+      summarise(
+        min = min(count_difference),
+        max = max(count_difference),
+        mean = mean(count_difference),
+        sd = sd(count_difference),
+        cd_range = max(count_difference)-min(count_difference)
+      )
+
+    
+    summary(within_sampling_cd_stats$cd_range)
+    
+    histogram(within_sampling_cd_stats$mean)
+    
+    summary(within_sampling_cd_stats$sd)
+    
+    histogram(within_sampling_cd_stats$sd)
+
+```
+
+
+```{r}
+
+simulated_data <- read.csv("Output/CombinedData_wide.csv")
+
+sim_day0 <- subset(simulated_data, Day==0)
+
+    # Define the list of anaerobes
+    anaerobes <- c("Ruminococcaceae", "Rikenellaceae", "Bacteroides", "Paeniclostridium")
+    
+    # Identify columns that match the pattern "[genus]_Rel_ab" for anaerobes
+    anaerobe_Rel_ab_cols <- paste0(anaerobes, "_Rel_ab")
+    anaerobe_N_cols <- paste0(anaerobes, "_N")
+    
+    # Create the new column by multiplying CFUlotini by (1 - sum of anaerobes)
+   sim_day0$CFUlotini_no_anaerobes <- sim_day0$CFUlotini * (1 - rowSums(sim_day0[anaerobe_Rel_ab_cols])) 
+
+    # Create the new column by substracting anaerobes from total N
+   sim_day0$N_no_anaerobes <- sim_day0$Total_N - (rowSums(sim_day0[anaerobe_N_cols]))
+
+    # Replace values smaller than 10 with 2.5
+  sim_day0$N_no_anaerobes[sim_day0$N_no_anaerobes < 10] <- 2.5
+
+   
+   
+   # calculate log 10 of new columns 
+   sim_day0$CFUlotinilog10_no_anaerobes <- log10(sim_day0$CFUlotini_no_anaerobes)
+
+   sim_day0$Nlog10_no_anaerobes <- log10(sim_day0$N_no_anaerobes)
+   
+
+   sim_day0$net_Log_red <- sim_day0$CFUlotinilog10_no_anaerobes - sim_day0$Nlog10_no_anaerobes
+   
+```
+
+
+
+
+```{r}
+
+hist(sim_day0$net_Log_red, freq = FALSE, )
+
+hist(past_samples_wide$count_difference, freq = FALSE)
+
+hist(within_sampling_cd_stats$mean, freq = FALSE)
+
+
+t.test(sim_day0$net_Log_red, past_samples_wide$count_difference )
+
+t.test(sim_day0$net_Log_red, within_sampling_cd_stats$mean)
+```
+
+```{r}
+
+
+
+# Create data frames for each histogram
+df1 <- data.frame(value = sim_day0$net_Log_red, source = "Simulated")
+df2 <- data.frame(value = past_samples_wide$count_difference, source = "Past Samples")
+df3 <- data.frame(value = within_sampling_cd_stats$mean, source="Observed")
+
+# Combine the data
+combined_df <- bind_rows(df1, df3)
+
+
+# Plot density-based histograms
+ggplot(combined_df, aes(x = value, fill = source)) +
+  geom_histogram(aes(y = ..density..), position = "identity", alpha = 0.4, bins = 30) +
+  scale_fill_manual(values = c("Simulated" = "red", "Observed" = "blue")) +
+  theme_minimal() +
+  labs(x = "log10 difference", y = "Density", fill = "Source")+
+  theme(
+              panel.grid = element_blank(),       # remove grid
+              panel.border = element_blank(),     # remove default border
+              axis.line = element_line(),         # keep axis lines
+              axis.ticks = element_line(),
+              axis.text.x = element_text(size = 10, color = "black"),
+              axis.text.y = element_text(size = 10, color = "black"),
+              axis.title = element_text(size = 10),
+              legend.position = c(0.8,0.8),
+              legend.text = element_text(size = 10),
+              legend.title = element_blank()
+            )
+
+ggsave(filename = "Validation - Histogram of simulated and observed log reduction 2025-12-03.tiff" , dpi = 100, width =8.9, height = 6, units = "cm", device = "tiff")
+
+
+
+
+
+```
+

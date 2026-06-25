@@ -1,0 +1,543 @@
+---
+title: "Analysis of results"
+output: html_document
+date: "2025-10-22"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Analysis of results 
+
+```{r}
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(epiR)
+library(stringr)
+library(patchwork)
+
+results_d21 <- read.csv("results D21 200k 2025-10-17.csv")
+results_d7 <- read.csv("results D7 200k 2025-10-17.csv")
+results_d14 <- read.csv("results D14 200k 2025-10-17.csv")
+
+results_all_days <- read.csv("results all days 200k 2025-10-17.csv")
+
+
+#results_all_days <- read.csv("results all days 200k 2025-10-03.csv")
+
+
+pre_growth <- read.csv("Model Data pre growth.csv")
+
+genus_rel_ab_cat <- read.csv("Input files/Abundance bins 20250501.csv", sep =";")
+
+#________________________________________________________________________________________
+
+## Descriptive analysis of baseline model
+
+
+  #growth over shelf life 
+
+# Base model output (percent > 6 log over shelf-life)
+   
+
+    # Calculate the sum of logN over 6 logs for each lot_id
+    summary_stats_alldays <- list()
+    for (i in 1:40) {
+      filtered_data <- subset(results_all_days, Day == i)
+      percent <- filtered_data %>%
+        group_by(lot_id) %>%
+        summarise(percent = sum(log10sumN > 6))
+      percent$mean_percent <- mean(percent$percent)
+      percent$median_percent <- median(percent$percent)
+      percent$perc_5 <- quantile(percent$percent, probs = 0.05)
+      percent$perc_10 <- quantile(percent$percent, probs = 0.10)
+      percent$perc_20 <- quantile(percent$percent, probs = 0.20)
+      percent$perc_30 <- quantile(percent$percent, probs = 0.30)
+      percent$perc_95 <- quantile(percent$percent, probs = 0.95)
+      percent <- percent[c("mean_percent", "median_percent", "perc_5","perc_10", "perc_20", "perc_30", "perc_95")][1,]
+      summary_stats_alldays[[i]] <- percent
+    }
+    summary_stats_alldays <- do.call(rbind,summary_stats_alldays)
+
+    summary_stats_alldays <- as.data.frame(summary_stats_alldays)
+    
+   # write.csv(summary_stats_alldays, file="spoiled container proportions for all 40 days median 5th 95th.csv")
+    
+    
+
+
+        shelflife_days = c(1:40)
+        summary_stats_alldays <- cbind(shelflife_days, summary_stats_alldays)
+        shelflife_plot <-   ggplot(summary_stats_alldays, aes(x = shelflife_days)) +
+          geom_line(aes(y = median_percent, linetype = "Median"), color = "black") +
+          geom_line(aes(y = perc_5, linetype = "5th Percentile"), color = "black") +
+          geom_line(aes(y = perc_95, linetype = "95th Percentile"), color = "black") +
+          geom_hline(yintercept = 25, color = "red") +
+          scale_linetype_manual(
+            name = NULL,
+            values = c("Median" = "solid", "5th Percentile" = "dotted", "95th Percentile" = "dashed")
+          ) +
+          labs(
+            x = "Shelf-life days",
+            y = "% milk containers over 6 log10 CFU/mL"
+          ) +
+          theme_bw()+
+          theme(
+            panel.grid = element_blank(),       # remove grid
+            panel.border = element_blank(),     # remove default border
+            axis.line = element_line(),         # keep axis lines
+            axis.ticks = element_line(),
+            plot.title = element_text(size = 8),
+            axis.text.x = element_text(size = 8, color = "black"),
+            axis.text.y = element_text(size = 8, color = "black"),
+            axis.title = element_text(size = 8),
+            legend.text = element_text(size = 8)
+            )
+        
+         # ggsave("Percent milk spoiled over shelflife 2025-10-23.tiff", dpi = 100, width = 14, height = 7, units = "cm", device = "tiff")
+            
+          
+
+
+
+  #analyse Day 21 data
+
+      #plot cumulative distribution of log10 CFU count
+      
+        # Base model output (cumulative distribution)
+          percentiles_D21 <- results_d21 %>%
+            group_by(lot_id) %>%
+            summarize(
+              p0 = quantile(log10sumN, 0),
+              p10 = quantile(log10sumN, 0.10),
+              p20 = quantile(log10sumN, 0.20),
+              p30 = quantile(log10sumN, 0.30),
+              p40 = quantile(log10sumN, 0.40),
+              p50 = quantile(log10sumN, 0.50),
+              p60 = quantile(log10sumN, 0.60),
+              p70 = quantile(log10sumN, 0.70),
+              p80 = quantile(log10sumN, 0.80),
+              p90 = quantile(log10sumN, 0.90),
+              p95 = quantile(log10sumN, 0.95),
+              p100 = quantile(log10sumN, 1)
+            )
+          
+          means_D21 <- results_d21 %>%
+            group_by(lot_id) %>%
+            summarize(
+              means = mean(log10sumN)
+            )
+          
+          medians_D21 <- apply(percentiles_D21[-1], 2, median)
+          percentile_5_D21 <- apply(percentiles_D21[-1], 2, function(x) quantile(x, 0.05))
+          percentile_95_D21 <- apply(percentiles_D21[-1], 2, function(x) quantile(x, 0.95))
+          result_D21 = rbind(medians_D21, percentile_5_D21, percentile_95_D21)
+          quantiles = c(0,0.1,0.2,0.3,0.4,0.5,0.6,0.7,0.8,0.9,0.95, 1)
+          result_D21 = rbind(quantiles,result_D21)
+          rownames(result_D21) = c("quantiles","medians","percentile_5","percentile_95")
+          result_D21 = t(result_D21)
+          result_D21 = as.data.frame(result_D21)
+          
+          result_D21$diff_5_95 <- result_D21$percentile_95-result_D21$percentile_5
+          
+          # Variability ratio 
+          VR_D21 = result_D21[11,2]/result_D21[6,2]
+          # Uncertainty ratio 
+          UR_D21 = result_D21[6,4]/result_D21[6,2]
+          # Overall Uncertainty Ratio 
+          OUR_D21 = result_D21[11,4]/result_D21[6,2]
+      
+
+          
+          
+           Count_percentiles_D21 <-ggplot(result_D21) +
+          # Median line
+          geom_line(aes(x = medians, y = quantiles, color = "Median", linetype = "Median"), size = 0.3528) +
+          # 5th percentile line
+          geom_line(aes(x = percentile_5, y = quantiles, color = "5th Percentile", linetype = "5th Percentile"), size = 0.3528) +
+          # 95th percentile line
+          geom_line(aes(x = percentile_95, y = quantiles, color = "95th Percentile", linetype = "95th Percentile"), size = 0.3528) +
+          # Spoilage threshold vertical line
+          geom_vline(aes(xintercept = 6, color = "Spoilage Threshold", linetype = "Spoilage Threshold"), size = 0.3528) +
+          theme_minimal() +
+          # Labels and theme
+          labs(
+            x = expression("TBC (log"[10]* " CFU/mL)"),
+            y = "within-lot quantiles",
+            color = "Legend",
+            linetype = "Legend"
+          ) +
+          scale_color_manual(values = c(
+            "Median" = "black",
+            "5th Percentile" = "black",
+            "95th Percentile" = "black",
+            "Spoilage Threshold" = "darkgreen"
+          )) +
+          scale_linetype_manual(values = c(
+            "Median" = "solid",
+            "5th Percentile" = "dotted",
+            "95th Percentile" = "dashed",
+            "Spoilage Threshold" = "solid"
+          )) +
+          theme(
+            panel.grid = element_blank(),       # remove grid
+            panel.border = element_blank(),     # remove default border
+            axis.line = element_line(),         # keep axis lines
+            axis.ticks = element_line(),
+            axis.text.x = element_text(size = 8, color = "black"),
+            axis.text.y = element_text(size = 8, color = "black"),
+            axis.title = element_text(size = 10),
+            legend.position = "none"   # 🔹 removes legend,
+          )
+          
+          ggsave(filename = "Count percentiles D21 2025-10-23.tiff", 
+                 plot = Count_percentiles_D21, 
+                 dpi = 100, width = 8.9, height = 7, 
+                 units = "cm", device = "tiff")
+          
+#_________________________________________________________________________________________          
+          
+#### Sensitivity analysis          
+          
+#Give the percentage of spoiled containers per lot and the 95% confidence interval
+
+    SpoilSummary_D21 <- results_d21 %>%
+      group_by(lot_id) %>%
+      summarise(
+        Num_Spoiled_Containers = sum(spoil == TRUE, na.rm = TRUE),
+        Total_Units = n_distinct(unit_id),  # Count unique unit_id values per lot
+        Proportion_Spoiled = Num_Spoiled_Containers / Total_Units
+      )
+    
+    summary(SpoilSummary_D21$Proportion_Spoiled)
+    
+    # Compute summary statistics for Proportion_Spoiled
+    SpoilStats_D21 <- SpoilSummary_D21 %>%
+      summarise(
+        Day = "21",
+        Mean_Proportion = mean(Proportion_Spoiled, na.rm = TRUE),
+        Median_Proportion = median(Proportion_Spoiled, na.rm = TRUE),
+        Standard_Deviation = sd(Proportion_Spoiled, na.rm = TRUE),
+        Lower_CI = Mean_Proportion - 1.96 * (sd(Proportion_Spoiled, na.rm = TRUE) / sqrt(n())),
+        Upper_CI = Mean_Proportion + 1.96 * (sd(Proportion_Spoiled, na.rm = TRUE) / sqrt(n())),
+        Perc_5th = quantile(Proportion_Spoiled, probs = 0.05),
+        Perc_95th = quantile(Proportion_Spoiled, probs = 0.95)
+  )
+    
+    
+    
+    # predictor dataframe for dependent variable "proportion of spoiled containers", uncertain predictors
+     # Convert 'spoil' to numeric (0 = FALSE, 1 = TRUE)
+    results_d21_wspoil <- results_d21 %>%
+      mutate(spoil = as.numeric(spoil))  
+    
+    
+    predictor_cols_uncD21 <- results_d21_wspoil %>%
+      group_by(lot_id) %>%
+      slice(1) %>%  # Take the first row for each lot_ID since the others are identical
+      ungroup() %>%
+      dplyr::select(lot_id, ends_with("_Rel_ab"), ends_with("_Log_Reduction"), CFUlotini)
+    
+    #merge with proportion spoiled information
+    predictor_cols_uncD21 <- predictor_cols_uncD21 %>%
+      left_join(SpoilSummary_D21 %>% dplyr ::select(lot_id, Proportion_Spoiled), by = "lot_id") 
+    
+    predictor_cols_uncD21 <- predictor_cols_uncD21 %>%
+      mutate(log10CFUlotini = log10(CFUlotini)) %>%
+      dplyr::select(-lot_id, -CFUlotini)%>%
+      relocate(Proportion_Spoiled, .after = last_col())
+    
+    
+    
+    predictor_df_D21 <- as.data.frame(predictor_cols_uncD21)
+    
+          # Compute PRCC
+          prcc_results_D21 <- epi.prcc(dat = predictor_df_D21)
+          
+          # Extract the p-values
+          p_values_D21 <- prcc_results_D21$p.value
+          
+          # Set your parameters
+          alpha <- 0.05
+          n_tests <- length(p_values_D21)
+          bonferroni_threshold <- alpha / n_tests
+          
+          # Add a flag for significance after Bonferroni correction
+          significant <- p_values_D21 < bonferroni_threshold
+          
+          # Combine into a data frame for easy viewing
+          results_bonferroni_corrected_D21 <- data.frame(
+            Factor = prcc_results_D21$var,
+            PRCC = prcc_results_D21$est,
+            P_value = p_values_D21,
+            Significant_after_Bonferroni = significant
+          )
+          
+          
+          
+          # Sort by PRCC-value and convert Factors to an ordered factor
+          
+          results_bonferroni_corrected_D21 <- results_bonferroni_corrected_D21 %>%
+            arrange(desc(abs(PRCC))) %>%
+            mutate(Factor = factor(Factor, levels = rev(unique(Factor))))  # reverse for top-to-bottom
+          
+          
+          
+          # Filter for significant factors only
+          results_sig <- results_bonferroni_corrected_D21 %>%
+            filter(Significant_after_Bonferroni == TRUE) 
+          
+        
+          # Make the tornado plot
+          
+          # Plot only significant factors
+          tornado_prcc_D21_lot <- ggplot(results_sig, aes(x = PRCC, y = Factor, fill = Significant_after_Bonferroni)) +
+            geom_col(width = 0.5) +
+            scale_fill_manual(values = c("TRUE" = "steelblue")) +
+            scale_x_continuous(breaks = c( -0.2,  0,  0.2,  0.4,  0.6,  0.8, 1.0)) +
+            theme_minimal() +
+            labs(
+              x = "PRCC",
+              y = "Factor",
+              fill = "Significant"
+            ) +
+            theme(
+              panel.grid = element_blank(),       # remove grid
+              panel.border = element_blank(),     # remove default border
+              axis.line = element_line(),         # keep axis lines
+              axis.ticks = element_line(),
+              axis.text.x = element_text(size = 10, color = "black"),
+              axis.text.y = element_text(size = 10, color = "black"),
+              axis.title = element_text(size = 10),
+              legend.position = "none"  # optional, since only TRUE is plotted
+            )
+          
+  
+          ggsave(filename = "tornado prcc 21 lot-wise parameters influencing TBC 2025-10-23.tiff", 
+                 plot = tornado_prcc_D21_lot, dpi = 100, width = 14, height = 6, units = "cm", device = "tiff")
+  
+          
+          
+        
+
+          
+#____________________________________________________________________________________________          
+          
+         
+           # predictor dataframe for dependent variable "log10sumN", variable predictors  
+    # Select only numeric predictor columns (excluding identifiers like lot_id, unit_id)
+  
+          
+      predictor_cols_varD21 <- results_d21 %>%
+      dplyr::select(-c(X, lot_id, unit_id, CFUlotini, Day, Total_N)) %>%
+      dplyr::select(-matches("(_N|_Rel_ab|_Log_Reduction)$")) %>%   # Exclude columns ending in 
+      dplyr::select(where(is.numeric))  # Ensure only numeric variables are included
+    
+    
+           predictor_df_D21 <- as.data.frame(predictor_cols_varD21)
+    
+  
+          # Compute PRCC
+          prcc_results_D21 <- epi.prcc(dat = predictor_df_D21)
+          
+          # Extract the p-values
+          p_values_D21 <- prcc_results_D21$p.value
+          
+          # Set your parameters
+          alpha <- 0.05
+          n_tests <- length(p_values_D21)
+          bonferroni_threshold <- alpha / n_tests
+          
+          # Add a flag for significance after Bonferroni correction
+          significant <- p_values_D21 < bonferroni_threshold
+          
+          # Combine into a data frame for easy viewing
+          results_bonferroni_corrected_D21 <- data.frame(
+            Factor = prcc_results_D21$var,
+            PRCC = prcc_results_D21$est,
+            P_value = p_values_D21,
+            Significant_after_Bonferroni = significant
+          )
+          
+          
+          
+          # Sort by PRCC-value and convert Factors to an ordered factor
+          
+          results_bonferroni_corrected_D21 <- results_bonferroni_corrected_D21 %>%
+            arrange(desc(abs(PRCC))) %>%
+            mutate(Factor = factor(Factor, levels = rev(unique(Factor))))  # reverse for top-to-bottom
+          
+          
+          
+          # Filter for significant factors only
+          results_sig <- results_bonferroni_corrected_D21 %>%
+            filter(Significant_after_Bonferroni == TRUE) 
+          
+    
+          # Plot only significant factors
+          tornado_prcc_D21_container <- ggplot(results_sig, aes(x = PRCC, y = Factor, fill = Significant_after_Bonferroni)) +
+            geom_col(width = 0.5) +
+            scale_fill_manual(values = c("TRUE" = "steelblue")) +
+            scale_x_continuous(breaks = c( -0.2,  0,  0.2,  0.4,  0.6,  0.8, 1.0)) +
+            theme_minimal() +
+            labs(
+              x = "PRCC",
+              y = "Factor",
+              fill = "Significant"
+            ) +
+            theme(
+              panel.grid = element_blank(),       # remove grid
+              panel.border = element_blank(),     # remove default border
+              axis.line = element_line(),         # keep axis lines
+              axis.ticks = element_line(),
+              axis.text.x = element_text(size = 10, color = "black"),
+              axis.text.y = element_text(size = 10, color = "black"),
+              axis.title = element_text(size = 10),
+              legend.position = "none"  # optional, since only TRUE is plotted
+            )
+          
+          
+          
+       ggsave(filename = "tornado prcc 21 container-wise  parameters influencing Proportion of containers 2025-10-23.tiff", 
+                  plot = tornado_prcc_D21_container, dpi = 100, width = 8.9, height = 6, units = "cm", device = "tiff")     
+  
+          
+          
+##___________________________________________________________________________________________________________          
+#analyse genera in extreme lots
+          
+             # Calculate the 5th and 95th percentiles
+        p5 <- quantile(SpoilSummary_D21$Proportion_Spoiled, 0.05, na.rm = TRUE)
+        p95 <- quantile(SpoilSummary_D21$Proportion_Spoiled, 0.95, na.rm = TRUE)
+        
+        extreme_lots <- SpoilSummary_D21 %>%
+          filter(Proportion_Spoiled <= p5 | Proportion_Spoiled >= p95) %>%
+          mutate(Percentile_Group = ifelse(Proportion_Spoiled <= p5, "5th Percentile", "95th Percentile")) %>%
+          dplyr::select(lot_id, Percentile_Group)
+      
+            
+            
+        # Step 1: Get one row per lot_id from results_d21 with only the Rel_ab columns
+        relab_data <- results_d21 %>%
+          filter(lot_id %in% extreme_lots$lot_id) %>%
+          dplyr::select(lot_id, ends_with("Rel_ab")) %>%
+          distinct(lot_id, .keep_all = TRUE)  # ensures only one row per lot_id
+        
+        
+        # Step 2: Join with extreme_lots to attach the Percentile_Group
+        extreme_lots_with_relab <- extreme_lots %>%
+          left_join(relab_data, by = "lot_id")
+        
+     #   write.csv(extreme_lots_with_relab, "Relative abundance Data of lots with 5th and 95th percentile spoiled proportions on Day 21 2025-11-26.csv")
+        
+     
+          
+                  # Reshape the dataframe
+        long_df <- extreme_lots_with_relab %>%
+          pivot_longer(
+            cols = ends_with("Rel_ab"),
+            names_to = "Genus",
+            values_to = "Rel_abundance"
+          )
+        
+        
+        long_df <- long_df %>%
+          mutate(Genus = sub("_Rel_ab$", "", Genus))
+        
+        long_df$log_Rel_abundance <- log10(long_df$Rel_abundance)
+       
+        
+        
+        extreme_lot_taxa <- ggplot(long_df, aes(x = Genus, y = log_Rel_abundance, fill = Percentile_Group)) +
+          geom_boxplot(position = position_dodge(width = 0.8),  outlier.size = 0.4) +
+          labs(
+            x = "Genus",
+            y = "Log10 Relative Abundance in BTRM"
+              ) +
+          theme_minimal() +
+          theme(panel.grid = element_blank(),       # remove grid
+                panel.border = element_blank(),     # remove default border
+                axis.line = element_line(),         # keep axis lines
+                axis.ticks = element_line(),
+                axis.text.x = element_text(angle = 45, hjust = 1, size = 8, color = "black"),
+                axis.text.y = element_text(size =8, color = "black"),
+                axis.title = element_text(size = 8),
+                legend.position = "none"  ) +        # 🔹 removes legend
+          scale_fill_manual(values = c("5th Percentile" = "#1f77b4", "95th Percentile" = "#ff7f0e"))
+          
+        
+          
+        
+        
+       #   ggsave(filename = "BTRM Relative abundances of taxa in extreme lots D21 2025-10-23.tiff", 
+               #  plot=extreme_lot_taxa, dpi = 100, width = 14, height = 8, 
+                # units = "cm", device = "tiff")
+
+          
+  #Paenibacillus stats in extreme lots
+        
+        
+         summary_df <- long_df %>%
+          group_by(Genus, Percentile_Group) %>%
+          summarise(
+            Mean = mean(Rel_abundance, na.rm = TRUE),
+            SD = sd(Rel_abundance, na.rm = TRUE),
+            .groups = "drop"
+          )
+        
+        
+        Paenibac_in_extreme_lots <- subset(long_df, Genus == "Paenibacillus")
+        
+          upper_lots_long_df <- subset(long_df, Percentile_Group == "95th Percentile")
+          lower_lots_long_df <- subset(long_df, Percentile_Group == "5th Percentile")
+        
+              genus_group_D <- genus_rel_ab_cat %>%
+                filter(D == 1, Genus != "Paenibacillus") %>%
+                pull(Genus)
+              
+              upper_lots_D <- upper_lots_long_df %>%
+                filter(Genus %in% genus_group_D)
+          
+              lower_lots_D <- lower_lots_long_df %>%
+                filter(Genus %in% genus_group_D)
+          
+          
+                summary(upper_lots_D$Rel_abundance)
+                summary(lower_lots_D$Rel_abundance)
+                
+                genus_quartiles_upper_lots <- upper_lots_D %>%
+                  group_by(Genus) %>%
+                  summarise(
+                    Q1 = quantile(Rel_abundance, 0.25, na.rm = TRUE),
+                    Q3 = quantile(Rel_abundance, 0.75, na.rm = TRUE),
+                    .groups = "drop"
+                  )
+              
+                genus_quartiles_lower_lots <- lower_lots_D %>%
+                  group_by(Genus) %>%
+                  summarise(
+                    Q1 = quantile(Rel_abundance, 0.25, na.rm = TRUE),
+                    Q3 = quantile(Rel_abundance, 0.75, na.rm = TRUE),
+                    .groups = "drop"
+                  )
+                
+              
+        
+                summary_df <- summary_df %>%
+                  arrange(desc(Mean)) %>%
+                  mutate(Genus = factor(Genus, levels = unique(Genus)))
+              
+          
+              Paenibac_stats_5th <- as.data.frame(as.array(summary(subset(Paenibac_in_extreme_lots$Rel_abundance, 
+                                                                          Paenibac_in_extreme_lots$Percentile_Group == "5th Percentile"))))
+        
+              Paenibac_stats_95th <- as.data.frame(as.array(summary(subset(Paenibac_in_extreme_lots$Rel_abundance, 
+                                                                          Paenibac_in_extreme_lots$Percentile_Group == "95th Percentile"))))
+        
+          
+          
+          
+```
+

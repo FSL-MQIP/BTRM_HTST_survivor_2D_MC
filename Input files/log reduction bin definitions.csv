@@ -1,0 +1,5 @@
+Category Code;Description;Min log red;Mean log red;Max log red
+A;Extremely heat resistant;0;1;1.5
+B;Thermodurics;2;3;4
+C;Semi-heat sensitive;4;5;6
+D;Heat-sensitive;8;9;10
